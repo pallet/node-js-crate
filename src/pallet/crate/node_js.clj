@@ -117,8 +117,8 @@
   "Returns a service-spec for installing nodejs."
   [settings]
   (server-spec
-   :phase {:settings (phase-fn (nodejs-settings settings))
-           :configure (phase-fn (install-nodejs))}))
+   :phases {:settings (phase-fn (nodejs-settings settings))
+            :configure (phase-fn (install-nodejs))}))
 
 
 ;;; # Example
