@@ -32,7 +32,7 @@
   (format "node-v%s.tar.gz" version))
 
 (defn src-download-path [version]
-  (format "%s%s" *nodejs-src-url* (tarfile version)))
+  (format "%sv%s/%s" *nodejs-src-url* version (tarfile version)))
 
 
 (def ^:dynamic *nodejs-defaults*
