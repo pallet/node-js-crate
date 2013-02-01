@@ -2,7 +2,7 @@
 
 This a crate to install and run node-js via [Pallet](http://pallet.github.com/pallet).
 
-[Release Notes](https://github.com/pallet/node-js-crate/blob/master/ReleaseNotes.md)
+[Release Notes](ReleaseNotes.md)
 
 ## Support
 
