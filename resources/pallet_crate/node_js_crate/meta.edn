@@ -1,0 +1,11 @@
+{:header "node-js"
+ :title
+ "A [pallet](http://palletops.com/) crate to install and configure
+ [node-js](http://nodejs.org)."
+ :git-repo "https://github.com/pallet/node-js-crate"
+ :api-docs "http://palletops.com/node-js-crate/0.8/api"
+ :annotated-docs "http://palletops.com/node-js-crate/0.8/annotated/uberdoc.html"
+ :tag-prefix ""
+ :artifact-id "node-js-crate"
+ :source-path "src/pallet/crate/node-js.clj"
+ :versions [{:pallet "0.8.0-RC.3" :version "0.8.0-SNAPSHOT"}]}

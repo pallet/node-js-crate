@@ -2,30 +2,29 @@
   "Install and configure node.js"
   (:require
    [clojure.string :as string]
-   [clojure.tools.logging :as logging]
-   [pallet.action.exec-script :as exec-script]
-   [pallet.action.remote-directory :as remote-directory]
-   [pallet.action.remote-file :as remote-file])
-  (:use
-   [pallet.action.package :only [install-deb packages]]
-   [pallet.action.remote-directory :only [remote-directory]]
-   [pallet.common.context :only [throw-map]]
-   [pallet.core :only [server-spec]]
-   [pallet.parameter :only [assoc-target-settings get-target-settings]]
-   [pallet.phase :only [phase-fn]]
-   [pallet.thread-expr :only [apply-map->]]
-   [pallet.utils :only [apply-map]]
+   [clojure.tools.logging :refer [debugf]]
+   [pallet.action :refer [with-action-options]]
+   [pallet.actions
+    :refer [exec-checked-script packages remote-directory remote-file]]
+   [pallet.common.context :refer [throw-map]]
+   [pallet.api :as api :refer [plan-fn]]
+   [pallet.crate :refer [assoc-settings defmethod-plan defplan get-settings]]
+   [pallet.crate-install :as crate-install]
+   [pallet.utils :refer [apply-map deep-merge]]
    [pallet.version-dispatch
-    :only [defmulti-version-crate defmulti-version defmulti-os-crate
-           multi-version-session-method multi-version-method
-           multi-os-session-method]]
-   [pallet.versions :only [version-string as-version-vector]]))
+    :refer [defmethod-version-plan defmulti-version-plan]]
+   [pallet.versions :refer [version-string as-version-vector]]))
 
-(def src-dir "/opt/local/node-js")
+(def facility :nodejs)
 
-(def md5s {"0.2.1" nil})
+(def ^:dynamic *nodejs-defaults*
+  {:version "0.6.10"})
+
+;;; # Build helpers
 
 (def ^:dynamic *nodejs-src-url* "http://nodejs.org/dist/")
+(def src-dir "/opt/local/node-js")
+(def md5s {"0.2.1" nil})
 
 (defn tarfile
   [version]
@@ -34,119 +33,134 @@
 (defn src-download-path [version]
   (format "%sv%s/%s" *nodejs-src-url* version (tarfile version)))
 
+;;; # Settings
+;;;
+;;; We install from package manager if possible, and fall back to
+;;; building from source
+;;;
+;;; Links:
+;;; https://github.com/joyent/node/wiki/Installing-Node.js-via-package-manager
 
-(def ^:dynamic *nodejs-defaults*
-  {:version "0.6.10"})
+(defmulti-version-plan default-settings [version])
 
-;;; Based on supplied settings, decide which install strategy we are using
-;;; for nodejs.
+;; If no distro specific method, build node-js from source
+(defmethod-version-plan
+  default-settings {:os :linux}
+  [os os-version version]
+  {:version version
+   :install-strategy ::build
+   :src-dir src-dir
+   :build {:url (src-download-path version)
+           :md5 (md5s version) :unpack :tar}})
 
-(defmulti-version-crate nodejs-version-settings [version session settings])
+;; on Ubuntu, we can install form PPA, as the distro version is old
+(defmethod-version-plan
+  default-settings {:os :ubuntu}
+  [os os-version version]
+  {:version version
+   :install-strategy :package-source
+   :package-source {:name "ppa:chris-lea"
+                    :aptitude
+                    {:url "ppa:chris-lea/node.js"}}
+   :packages ["nodejs"]})
 
-(multi-version-session-method
-    nodejs-version-settings {:os :linux}
-    [os os-version version session settings]
-  (cond
-    (:strategy settings) settings
-    (:build settings) (assoc settings :strategy :build)
-    (:deb settings) (assoc settings :strategy :deb)
-    :else (assoc settings
-            :strategy :build
-            :build {:url (src-download-path (:version settings))
-                    :md5 (md5s version) :unpack :tar})))
+;; on amazon linux, we can install from the already installed epel
+(defmethod-version-plan
+  default-settings {:os :amzn-linux}
+  [os os-version version]
+  {:version version
+   :install-strategy :packages
+   :packages ["nodejs" "npm"]
+   :package-options {:enable "epel"}})
+
+;; on Redhat based distros, we can install form EPEL
+(defmethod-version-plan
+  default-settings {:os :rh-base}
+  [os os-version version]
+  {:version version
+   :install-strategy :package-source
+   :repository {:id :epel
+                :version "6.8"}
+   :packages ["nodejs" "npm"]})
+
+;; on fedeora, we can install from yum
+(defmethod-version-plan
+  default-settings {:os :fedora}
+  [os os-version version]
+  {:version version
+   :install-strategy :packages
+   :packages ["nodejs"]})
+
+;; on suse, we can install from zypper
+(defmethod-version-plan
+  default-settings {:os :suse}
+  [os os-version version]
+  {:version version
+   :install-strategy :packages
+   :packages ["nodejs"]})
+
+;; on arch distros, we can install from pacman
+(defmethod-version-plan
+  default-settings {:os :arch-base}
+  [os os-version version]
+  {:version version
+   :install-strategy :packages
+   :packages ["nodejs"]})
+
+;; on gentoo distros, we can install from emerge
+(defmethod-version-plan
+  default-settings {:os :arch-base}
+  [os os-version version]
+  {:version version
+   :install-strategy :packages
+   :packages ["nodejs"]})
+
+;; on osx, we can install from brew
+(defmethod-version-plan
+  default-settings {:os :arch-base}
+  [os os-version version]
+  {:version version
+   :install-strategy :packages
+   :packages ["nodejs"]})
 
 ;;; ## Settings
-(defn- settings-map
-  "Dispatch to either openjdk or oracle settings"
-  [session settings]
-  (nodejs-version-settings
-   session
-   (as-version-vector (string/replace (:version settings) "-SNAPSHOT" ""))
-   (merge *nodejs-defaults* settings)))
-
-(defn nodejs-settings
-  "Capture settings for nodejs
-:version
-:download
-:deb"
-  [session {:keys [version download deb instance-id]
-            :or {version (:version *nodejs-defaults*)}
-            :as settings}]
-  (let [settings (settings-map session (merge {:version version} settings))]
-    (assoc-target-settings session :nodejs instance-id settings)))
+(defn settings
+  "Capture settings for nodejs"
+  [{:keys [version instance-id]
+    :or {version (:version *nodejs-defaults*)}
+    :as settings}]
+  (let [settings (deep-merge (default-settings version)
+                             (dissoc settings :instance-id))]
+    (debugf "node-js settings %s" settings)
+    (assoc-settings facility settings {:instance-id instance-id})))
 
 ;;; # Install
 
-;;; Dispatch to install strategy
-(defmulti install-method (fn [session settings] (:strategy settings)))
-(defmethod install-method :build
-  [session {:keys [build]}]
-  (->
-   session
-   (packages
-    :yum ["gcc" "glib" "glibc-common" "python"]
-    :aptitude ["build-essential" "python" "libssl-dev"])
-   (apply-map-> remote-directory/remote-directory src-dir build)
-   (exec-script/exec-checked-script
-    "Build node-js"
-    (cd ~src-dir)
-    ("./configure")
-    (make)
-    (make install)
-    (cd -))))
+(defmethod-plan crate-install/install ::build
+  [facility instance-id]
+  (let [{:keys [build src-dir]} (get-settings
+                                 facility {:instance-id instance-id})]
+    (packages
+     :yum ["gcc" "glib" "glibc-common" "python"]
+     :aptitude ["build-essential" "python" "libssl-dev"])
+    (apply-map remote-directory src-dir build)
+    (with-action-options {:script-dir src-dir}
+      (exec-checked-script
+       "Build node-js"
+       ("./configure")
+       ("make")
+       ("make" install)))))
 
-(defmethod install-method :deb
-  [session {:keys [deb]}]
-  (apply-map install-deb session "node" deb))
-
-(defn install-nodejs
-  "Install nodejs. By default will build from source."
-  [session & {:keys [instance-id]}]
-  (let [settings (get-target-settings
-                  session :nodejs instance-id ::no-settings)]
-    (logging/debugf "install-nodejs settings %s" settings)
-    (if (= settings ::no-settings)
-      (throw-map
-       "Attempt to install nodejs without specifying settings"
-       {:message "Attempt to install nodejs without specifying settings"
-        :type :invalid-operation})
-      (install-method session settings))))
+(defplan install
+  [{:keys [instance-id]}]
+  (crate-install/install facility instance-id))
 
 ;;; # Server spec
-(defn nodejs
+(defn server-spec
   "Returns a service-spec for installing nodejs."
-  [settings]
-  (server-spec
-   :phases {:settings (phase-fn (nodejs-settings settings))
-            :configure (phase-fn (install-nodejs))}))
-
-
-;;; # Example
-#_
-(pallet.core/defnode a {}
-  :bootstrap (pallet.action/phase
-              (pallet.crate.automated-admin-user/automated-admin-user))
-  :settings (phase-fn (nodejs-settings {}))
-  :configure (pallet.action/phase
-              (pallet.crate.node-js/install-nodejs)
-              (pallet.crate.upstart/package)
-              (pallet.action.remote-file/remote-file
-               "/tmp/node.js"
-               :content "
-var sys = require(\"sys\"),
-    http = require(\"http\");
-
-http.createServer(function(request, response) {
-    response.sendHeader(200, {\"Content-Type\": \"text/html\"});
-    response.write(\"Hello World!\");
-    response.close();
-}).listen(8080);
-
-sys.puts(\"Server running at http://localhost:8080/\");"
-               :literal true)
-              (pallet.crate.upstart/job
-               "nodejs"
-               :script "export HOME=\"/home/duncan\"
-    exec sudo -u duncan /usr/local/bin/node /tmp/node.js 2>&1 >> /var/log/node.log"
-               :start-on "startup"
-               :stop-on "shutdown")))
+  [{:keys [instance-id] :as settings}]
+  (api/server-spec
+   :phases {:settings (plan-fn
+                       (pallet.crate.node-js/settings settings))
+            :install (plan-fn
+                       (install {:instance-id instance-id}))}))
