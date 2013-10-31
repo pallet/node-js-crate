@@ -1,4 +1,4 @@
-(defproject com.palletops/node-js-crate "0.8.0-alpha.1"
+(defproject com.palletops/node-js-crate "0.8.0-SNAPSHOT"
   :description "Crate for node-js installation"
   :url "http://github.com/pallet/node-js-crate"
   :license {:name "Eclipse Public License"
