@@ -1,5 +1,10 @@
 # Release notes
 
+## pallet-crates-0.8.0-alpha.1
+
+- Update to pallet 0.8.0-RC.4
+
+- Use lein
 
 ## pallet-crates-0.5.0
 
@@ -11,7 +16,7 @@
 
 - Update for 0.5.0-SNAPSHOT
   Change pallet.resource.* to pallet.action.*. Change stevedore calls to
-  script functions to use unquote and the pallet.script.lib namespace. 
+  script functions to use unquote and the pallet.script.lib namespace.
   Change request to session.  Change build-resources to build-actions.
 
 
@@ -29,4 +34,3 @@
 - Add upstart (and comment using it to start a node.js server)
 
 - Add simple node.js crate
-
