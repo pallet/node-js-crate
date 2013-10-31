@@ -22,7 +22,7 @@
 (deftest invoke-test
   (is (build-actions {}
         (node-js/settings {})
-        (node-js/install))))
+        (node-js/install {}))))
 
 (def settings-map {})
 
