@@ -18,7 +18,7 @@
 (def facility :nodejs)
 
 (def ^:dynamic *nodejs-defaults*
-  {:version "0.6.10"})
+  {:version "4.0.0"})
 
 ;;; # Build helpers
 
